@@ -1,0 +1,21 @@
+
+# virtual environment
+venv/
+.env
+
+# python cache
+__pycache__/
+*.pyc
+
+# streamlit
+.streamlit/
+
+# models / cache (optional but good)
+*.joblib
+
+# OS files
+.DS_Store
+Thumbs.db
+
+.idea/
+
