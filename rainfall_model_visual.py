@@ -5,7 +5,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 
-# ------------------ Styling ------------------
+# ------------------ UI STYLE ------------------
 def local_css():
     st.markdown("""
         <style>
@@ -21,7 +21,7 @@ def local_css():
 
 local_css()
 
-# ------------------ Load Data ------------------
+# ------------------ LOAD DATA ------------------
 data = pd.read_csv("rainfall_data.csv")
 
 X = data.drop("rainfall", axis=1)
@@ -31,124 +31,109 @@ X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
 )
 
-# ------------------ Train Model ------------------
+# ------------------ TRAIN MODEL ------------------
 model = RandomForestClassifier(n_estimators=100, random_state=42)
 model.fit(X_train, y_train)
 
-y_pred = model.predict(X_test)
-acc = accuracy_score(y_test, y_pred)
+acc = accuracy_score(y_test, model.predict(X_test))
 
-# ------------------ Header ------------------
+# ------------------ HEADER ------------------
 st.title("☔ Rainfall Predictor")
 st.markdown("### Machine Learning based Rain Prediction")
 st.markdown("---")
 
-# ------------------ Sidebar ------------------
+# ------------------ SIDEBAR ------------------
 with st.sidebar:
     st.markdown("### About")
     st.caption("Built by Muhammad Zia Uddin")
     st.write(
-        "This model predicts the **chance of rainfall** using "
-        "real-time weather parameters such as temperature, humidity, "
-        "pressure, cloud cover, wind speed and visibility."
+        "This model predicts the **chance of rainfall** using real-time "
+        "weather parameters such as temperature, humidity, pressure, "
+        "cloud cover, wind speed and visibility."
     )
 
-# ------------------ Model Info ------------------
+# ------------------ MODEL INFO ------------------
 col1, col2 = st.columns(2)
 col1.metric("Model Accuracy", f"{acc:.2%}")
 col2.code("Random Forest Classifier")
 
-# ------------------ PIN Code Input ------------------
+# ------------------ PIN INPUT ------------------
 st.markdown("### 📍 Enter PIN Code (India)")
-pincode = st.text_input("Example: 500024")
+pin_code = st.text_input("Example: 500024", max_chars=6)
 
-# ------------------ PIN → Lat/Lon (FIXED) ------------------
-def get_lat_lon_from_pincode(pincode):
-    url = (
-        "https://geocoding-api.open-meteo.com/v1/search"
-        f"?postalcode={pincode}&country=IN"
-    )
-    r = requests.get(url, timeout=10)
-    r.raise_for_status()
-    data = r.json()
+if pin_code:
+    try:
+        # ---------- STEP 1: PIN → LAT/LON ----------
+        geo_url = (
+            "https://geocoding-api.open-meteo.com/v1/search"
+            f"?postal_code={pin_code}&country=IN&count=1"
+        )
 
-    if "results" not in data or len(data["results"]) == 0:
-        return None, None, None
+        geo_resp = requests.get(geo_url, timeout=10)
+        geo_resp.raise_for_status()
+        geo_data = geo_resp.json()
 
-    loc = data["results"][0]
-    return loc["latitude"], loc["longitude"], loc["name"]
+        if "results" not in geo_data:
+            st.error("Invalid PIN code. Location not found.")
+            st.stop()
 
-if not pincode:
-    st.stop()
+        location = geo_data["results"][0]
+        lat = location["latitude"]
+        lon = location["longitude"]
+        place = location.get("name", "Unknown location")
 
-try:
-    lat, lon, place = get_lat_lon_from_pincode(pincode)
+        # ---------- STEP 2: WEATHER ----------
+        weather_url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            "&current=temperature_2m,relative_humidity_2m,"
+            "cloud_cover,windspeed_10m,pressure_msl,visibility"
+        )
 
-    if lat is None:
-        st.error("Invalid PIN code. Location not found.")
-        st.stop()
+        weather_resp = requests.get(weather_url, timeout=10)
+        weather_resp.raise_for_status()
+        current = weather_resp.json()["current"]
 
-    st.success(f"Location detected: {place}")
+        features = [
+            current["pressure_msl"],
+            current["temperature_2m"],
+            current["relative_humidity_2m"],
+            current["windspeed_10m"],
+            current["cloud_cover"],
+            round(current["visibility"] / 1000)
+        ]
 
-    # ------------------ Fetch Live Weather ------------------
-    weather_api = (
-        "https://api.open-meteo.com/v1/forecast"
-        f"?latitude={lat}&longitude={lon}"
-        "&current=temperature_2m,relative_humidity_2m,"
-        "cloud_cover,windspeed_10m,pressure_msl,visibility"
-    )
+        # ---------- DISPLAY WEATHER ----------
+        st.markdown("### 🌐 Live Weather Data")
+        st.write(f"**Location:** {place} ({pin_code})")
+        st.write(f"🌡️ Temperature: {features[1]} °C")
+        st.write(f"💧 Humidity: {features[2]} %")
+        st.write(f"🌬️ Wind Speed: {features[3]} km/h")
+        st.write(f"🌥️ Cloud Cover: {features[4]} %")
+        st.write(f"📈 Pressure: {features[0]} hPa")
+        st.write(f"👁️ Visibility: {features[5]} km")
 
-    resp = requests.get(weather_api, timeout=10)
-    resp.raise_for_status()
-    current = resp.json()["current"]
+        # ---------- PREDICTION ----------
+        prediction = model.predict([features])[0]
+        probability = model.predict_proba([features])[0][prediction]
 
-    pressure = current.get("pressure_msl", 1010)
-    temperature = current.get("temperature_2m", 25)
-    humidity = current.get("relative_humidity_2m", 60)
-    windspeed = current.get("windspeed_10m", 10)
-    cloudcover = current.get("cloud_cover", 50)
-    visibility = round(current.get("visibility", 10000) / 1000)
+        st.markdown("---")
 
-    st.markdown("### 🌐 Live Weather Data")
-    st.write(f"🌡️ Temperature: {temperature} °C")
-    st.write(f"💧 Humidity: {humidity} %")
-    st.write(f"🌬️ Wind Speed: {windspeed} km/h")
-    st.write(f"🌥️ Cloud Cover: {cloudcover} %")
-    st.write(f"📈 Pressure: {pressure} hPa")
-    st.write(f"👁️ Visibility: {visibility} km")
+        if prediction == 1:
+            st.success(
+                f"🌧️ **Rain Expected**\n\n"
+                f"Confidence: **{probability:.2%}**\n\n"
+                "_This means: based on current weather patterns, "
+                "the model leans toward rainfall — not a guarantee._"
+            )
+        else:
+            st.info(
+                f"☀️ **No Rain Expected**\n\n"
+                f"Confidence: **{probability:.2%}**"
+            )
 
-    # ------------------ Prediction ------------------
-    features = [[
-        pressure,
-        temperature,
-        humidity,
-        windspeed,
-        cloudcover,
-        visibility
-    ]]
-
-    prediction = model.predict(features)[0]
-    probability = model.predict_proba(features)[0][prediction]
-
-    st.markdown("---")
-
-    if prediction == 1:
-        st.success(f"🌧️ Rain Expected with **{probability:.2%} confidence**")
-    else:
-        st.info(f"☀️ No Rain Expected with **{probability:.2%} confidence**")
-
-    # ------------------ Explanation ------------------
-    st.markdown("### 🤔 What does this confidence mean?")
-    st.write(
-        f"The model analyzed current weather conditions and found patterns "
-        f"similar to **{probability:.0%}** of past situations where the outcome "
-        f"was **{'rain' if prediction == 1 else 'no rain'}**.\n\n"
-        "This is **not a guarantee**. Weather is chaotic — the model provides "
-        "a **probability**, not a promise."
-    )
-
-except Exception as e:
-    st.error(f"Error fetching weather data: {e}")
+    except requests.exceptions.RequestException:
+        st.error("Weather service temporarily unavailable. Try again later.")
 
 
 
